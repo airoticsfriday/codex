@@ -6,6 +6,32 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
+pub(crate) fn deserialize_feature_entries<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<String, bool>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = BTreeMap::<String, toml::Value>::deserialize(deserializer)?;
+    let mut entries = BTreeMap::new();
+    for (key, value) in values {
+        match value {
+            toml::Value::Boolean(enabled) => {
+                entries.insert(key, enabled);
+            }
+            toml::Value::Table(_) if !crate::is_known_feature_key(&key) => {
+                tracing::warn!(feature = %key, "Ignoring unsupported structured feature configuration");
+            }
+            _ => {
+                return Err(serde::de::Error::custom(format!(
+                    "feature `{key}` must be a boolean"
+                )));
+            }
+        }
+    }
+    Ok(entries)
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ToolRegistryConfigToml {

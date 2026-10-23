@@ -15,6 +15,31 @@ use toml::Table;
 use toml::Value as TomlValue;
 
 #[test]
+fn newer_structured_features_do_not_block_known_boolean_features() {
+    let features: FeaturesToml = toml::from_str(
+        "shell_tool = false\nfuture_boolean = true\n[context_management]\nenabled = true\n",
+    )
+    .expect("newer structured feature settings should be ignored");
+    assert_eq!(
+        features.entries(),
+        BTreeMap::from([
+            ("shell_tool".to_string(), false),
+            ("future_boolean".to_string(), true),
+        ])
+    );
+}
+
+#[test]
+fn known_boolean_features_reject_structured_values() {
+    assert!(toml::from_str::<FeaturesToml>("[shell_tool]\nenabled = true\n").is_err());
+}
+
+#[test]
+fn feature_entries_reject_non_boolean_scalar_values() {
+    assert!(toml::from_str::<FeaturesToml>("future_boolean = 'yes'\n").is_err());
+}
+
+#[test]
 fn transcript_v2_resolves_explicit_config_overrides() {
     let mut features = Features::with_defaults();
     for enabled in [false, true, false] {
