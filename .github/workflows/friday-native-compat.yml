@@ -1,0 +1,72 @@
+name: Friday native compatibility packages
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    env:
+      CARGO_BUILD_JOBS: 4
+      CODEX_REPO_ROOT: ${{ github.workspace }}/codex
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: airoticsfriday/codex
+          ref: b96121a9f76e232aef31becac8b579b011dd408a
+          path: codex
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned native toolchain
+        working-directory: codex/codex-rs
+        run: rustup show active-toolchain
+      - name: Build canonical public native package
+        working-directory: codex
+        run: python scripts/build_codex_package.py --variant codex --target ${{ matrix.target }} --cargo-profile release --package-dir ../package
+      - name: Verify newer structured configuration
+        shell: python
+        run: |
+          import json, os, pathlib, subprocess, tempfile
+          binary = pathlib.Path('package/bin') / ('codex.exe' if os.name == 'nt' else 'codex')
+          with tempfile.TemporaryDirectory() as home:
+              config = pathlib.Path(home) / 'config.toml'
+              config.write_text('model_provider="friday_probe"\n[model_providers.friday_probe]\nname="Friday config probe"\nbase_url="http://127.0.0.1:1"\nwire_api="responses"\nrequires_openai_auth=false\n[features.context_management]\nenabled=true\n', encoding='utf-8')
+              child = subprocess.Popen([str(binary.resolve()), 'app-server', '--stdio'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env={**os.environ, 'CODEX_HOME': home})
+              try:
+                  for request in [dict(id=1, method='initialize', params=dict(clientInfo=dict(name='friday-config-probe', version='1'), capabilities=dict(experimentalApi=True))), dict(id=2, method='config/read', params=dict(includeLayers=False))]:
+                      child.stdin.write(json.dumps(request)+'\n'); child.stdin.flush()
+                      while True:
+                          line = child.stdout.readline()
+                          if not line: raise RuntimeError('Native config probe exited unexpectedly')
+                          message = json.loads(line)
+                          if message.get('id') == request['id']:
+                              if 'error' in message: raise RuntimeError('Native config probe rejected the structured feature')
+                              break
+                      if request['id'] == 1:
+                          child.stdin.write(json.dumps(dict(method='initialized', params={}))+'\n'); child.stdin.flush()
+              finally:
+                  child.stdin.close()
+                  child.wait(timeout=30)
+          print('Native configuration compatibility verified')
+      - name: Archive the package
+        shell: bash
+        run: tar -czf friday-codex-${{ matrix.target }}.tar.gz -C package .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: friday-codex-${{ matrix.target }}
+          path: friday-codex-${{ matrix.target }}.tar.gz
+          retention-days: 2
