@@ -768,7 +768,10 @@ pub struct FeaturesToml {
     removed_apps_mcp_path_override: Option<FeatureToml<RemovedAppsMcpPathOverrideConfigToml>>,
     pub network_proxy: Option<FeatureToml<NetworkProxyConfigToml>>,
     /// Boolean feature toggles keyed by canonical or legacy feature name.
-    #[serde(flatten, deserialize_with = "feature_configs::deserialize_feature_entries")]
+    #[serde(
+        flatten,
+        deserialize_with = "feature_configs::deserialize_feature_entries"
+    )]
     entries: BTreeMap<String, bool>,
 }
 
